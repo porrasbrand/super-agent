@@ -24,9 +24,60 @@ The remote Claude processes tasks autonomously and publishes results to **https:
 - **Task Queue** (`tasks/queue.json`) - Pending/processing/completed tasks
 - **Status File** (`tasks/current-status.json`) - Current task status (easy to read)
 
+## Delegating to Remote Claude
+
+### When to Use Remote Claude vs Local Claude
+
+**Use Remote Claude for:**
+- ✅ Publishing reports to www.manuelporras.com (remote has Apache access)
+- ✅ Long-running research tasks (frees up local session)
+- ✅ SEO processing tasks (remote has WordPress/database access)
+- ✅ Tasks requiring specific remote tools or access
+- ✅ Background processing while you continue working locally
+
+**Use Local Claude (yourself) for:**
+- ✅ Quick questions and answers
+- ✅ Code modifications in this repository
+- ✅ Immediate analysis and feedback
+- ✅ Managing the super-agent system itself
+- ✅ Tasks requiring local file access
+
+### Syntax Convention: How User Tells You to Use Remote
+
+When the user wants **remote Claude** to do something, they'll use one of these patterns:
+
+```
+"Send to remote: <message>"
+"Remote Claude: <message>"
+"Have remote Claude <do something>"
+"@remote <message>"
+"Queue for remote: <message>"
+```
+
+**Examples:**
+```
+User: "@remote Research PLTR stock and publish report to manuelporras.com"
+You: *Use ./scripts/send-message.sh or add-task.sh*
+
+User: "Send to remote: Create SEO report for example.com"
+You: *Use super-agent to send the message*
+
+User: "Have remote Claude check the health of all services"
+You: *Queue the task for remote processing*
+```
+
+When the user uses **normal conversation** (no prefix), that's for you (local Claude):
+```
+User: "What files are in this directory?"
+You: *Use ls command yourself, don't send to remote*
+
+User: "Explain how super-agent works"
+You: *Read the code and explain, don't delegate*
+```
+
 ## Quick Commands
 
-### Send Messages
+### Send Messages to Remote
 
 **Direct send** (immediate, waits for response):
 ```bash
