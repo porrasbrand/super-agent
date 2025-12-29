@@ -39,6 +39,20 @@ class SuperAgent {
   }
 
   /**
+   * Check if a server is already running on the notification port
+   */
+  async isNotificationServerRunning() {
+    try {
+      const response = await fetch(`http://localhost:${this.config.notificationPort}/health`, {
+        signal: AbortSignal.timeout(1000)
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Initialize super-agent (connect SSH, start notification server)
    */
   async initialize() {
@@ -48,13 +62,22 @@ class SuperAgent {
 
     // Start notification server if using webhooks
     if (this.notificationServer) {
-      try {
-        await this.notificationServer.start();
-        console.log(`[SuperAgent] Notification server started on port ${this.config.notificationPort}`);
-      } catch (error) {
-        console.warn('[SuperAgent] Failed to start notification server:', error.message);
-        console.warn('[SuperAgent] Falling back to polling only');
+      // Check if a standalone server is already running
+      const serverRunning = await this.isNotificationServerRunning();
+
+      if (serverRunning) {
+        console.log(`[SuperAgent] Notification server already running on port ${this.config.notificationPort}`);
+        console.log('[SuperAgent] Using polling mode (standalone server handles webhooks separately)');
         this.notificationServer = null;
+      } else {
+        try {
+          await this.notificationServer.start();
+          console.log(`[SuperAgent] Notification server started on port ${this.config.notificationPort}`);
+        } catch (error) {
+          console.warn('[SuperAgent] Failed to start notification server:', error.message);
+          console.warn('[SuperAgent] Falling back to polling only');
+          this.notificationServer = null;
+        }
       }
     }
 

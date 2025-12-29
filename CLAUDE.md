@@ -275,6 +275,40 @@ MESSAGE_TIMEOUT_MS=180000
 REMOTE_TMUX_SESSION=seo
 ```
 
+## Notification Server Modes
+
+SuperAgent supports two modes for receiving webhook notifications:
+
+### Standalone Server Mode (Recommended for Multiple Messages)
+Run a persistent notification server:
+```bash
+node src/notification-server-standalone.js &
+```
+
+Benefits:
+- Single server handles all webhooks
+- Always ready to receive notifications
+- No startup/shutdown overhead per message
+
+When standalone server is running:
+- `send-message.sh` detects it automatically
+- Falls back to polling mode (standalone server can't share state with CLI instances)
+- No port conflicts (EADDRINUSE errors avoided)
+
+### Embedded Server Mode (Automatic for Single Messages)
+When no standalone server is running:
+- Each `send-message.sh` creates its own notification server
+- Server starts, waits for response, then stops
+- Slightly slower due to startup/shutdown overhead
+
+### Port Conflict Resolution
+SuperAgent automatically detects if port 9000 is in use:
+1. Checks `http://localhost:9000/health` before starting server
+2. If server exists: Uses polling mode, logs detection message
+3. If not: Starts embedded server for this message
+
+**No configuration needed** - system adapts automatically.
+
 ## Remote System
 
 ### Remote Claude
