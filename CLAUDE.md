@@ -517,9 +517,26 @@ All logic lives in code (`*.js`, `*.sh`), not in Claude's memory. This makes the
 
 ## Recent Changes
 
-### 2025-12-29: Unified Trigger System
+### 2025-12-29: System Improvements
+
+**Unified Trigger System:**
 - ✅ Updated webhook-notifier.js to trigger for ALL messages (super-agent + Slack)
 - ✅ Implemented split command fix for tmux send-keys (Enter key execution)
 - ✅ Removed manual triggering from super-agent.js (eliminated duplicates)
 - ✅ Deprecated smart-queue-trigger.sh (killed on remote)
 - ✅ Single unified trigger point eliminates duplicate "check queue" commands
+
+**Race Condition Fix:**
+- ✅ Added recentCompletions cache (60s TTL) to notification-server.js
+- ✅ Fixed webhook initialization bug (config.useWebhooks → this.config.useWebhooks)
+- ✅ Webhooks arriving before waitForNotification() now cached and retrieved
+
+**Port Conflict Resolution:**
+- ✅ Added automatic port detection (isNotificationServerRunning)
+- ✅ Eliminated EADDRINUSE errors when standalone server running
+- ✅ Graceful fallback to polling mode when port in use
+
+**Remote System Documentation:**
+- ✅ Updated remote CLAUDE.md with automated system architecture
+- ✅ Added queue-helper.js respond-superagent command for super-agent messages
+- ✅ Documented message source routing (super-agent vs Slack)
