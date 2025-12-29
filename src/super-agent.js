@@ -236,10 +236,8 @@ class SuperAgent {
 
     console.log(`[SuperAgent] Message queued on remote`);
 
-    // Trigger remote Claude to check queue
-    // This works because remote session is in bypassPermissions mode
-    // webhook-notifier also provides backup triggering for redundancy
-    await this.triggerRemoteQueueCheck();
+    // Note: webhook-notifier automatically detects new pending messages and triggers queue check
+    // No manual trigger needed - reduces duplicate "check queue" commands
 
     // Wait for response using webhooks + polling fallback
     const response = await this.waitForResponse(messageId, options.timeout || this.config.messageTimeout);
