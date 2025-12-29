@@ -70,7 +70,7 @@ try {
 async function triggerQueueCheck() {
   try {
     const tmuxSession = 'seo';
-    // Send simple "check queue" - CLAUDE.md has instructions for what this means
+    // Unified trigger for ALL messages (super-agent + Slack)
     // Session is in bypass permissions mode - do NOT use BTab (it cycles modes away from bypass)
     // Split into two tmux commands: first types text, then sends C-m (Enter)
     // This ensures Claude Code CLI processes the Enter key correctly
@@ -115,36 +115,33 @@ async function notifyWebhook(messageId) {
 }
 
 /**
- * Check for new pending messages from super-agent and trigger processing
+ * Check for new pending messages and trigger processing
+ * Handles ALL messages (both super-agent and Slack)
  */
 async function checkPendingQueue() {
   try {
     const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8'));
 
-    // Find new pending messages from super-agent
+    // Find new pending messages (from any source)
     for (const message of queue.pending) {
       if (triggeredPendingMessages.has(message.id)) {
         continue; // Already triggered
       }
 
-      // Only trigger for messages from super-agent user
-      if (message.user === 'super-agent') {
-        console.log(`🚀 New super-agent message detected: ${message.id}`);
-        console.log(`   Query: ${message.query.substring(0, 60)}...`);
+      // Trigger for ALL pending messages (super-agent, Slack, etc.)
+      const source = message.user === 'super-agent' ? 'super-agent' : 'Slack';
+      console.log(`🚀 New ${source} message detected: ${message.id}`);
+      console.log(`   Query: ${message.query.substring(0, 60)}...`);
 
-        const success = await triggerQueueCheck();
+      const success = await triggerQueueCheck();
 
-        if (success) {
-          triggeredPendingMessages.add(message.id);
-          console.log(`✅ Triggered processing for message ${message.id}`);
-        }
-
-        // Only trigger once per file change (batch processing)
-        break;
-      } else {
-        // Mark as seen but don't trigger (not from super-agent)
+      if (success) {
         triggeredPendingMessages.add(message.id);
+        console.log(`✅ Triggered processing for message ${message.id}`);
       }
+
+      // Only trigger once per file change (batch processing)
+      break;
     }
 
     // Cleanup: Remove IDs that are no longer pending
@@ -211,8 +208,9 @@ watch(QUEUE_FILE, (eventType) => {
 });
 
 console.log('👀 Watching for new messages (AUTONOMOUS MODE)...');
-console.log('   - Auto-triggers "check queue" when super-agent messages arrive');
-console.log('   - Sends webhooks when messages are processed');
+console.log('   - Auto-triggers "check queue" for ALL messages (super-agent + Slack)');
+console.log('   - Sends webhooks when super-agent messages are processed');
+console.log('   - Replaces smart-queue-trigger.sh (unified trigger)');
 console.log('Press Ctrl+C to stop');
 console.log('');
 
