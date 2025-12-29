@@ -1,0 +1,20 @@
+{
+  "name": "super-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Inter-Claude communication via Slack message queue",
+  "main": "src/super-agent.js",
+  "scripts": {
+    "start": "node src/cli.js",
+    "server": "node src/notification-server-standalone.js",
+    "test": "node src/test-notification-server.js"
+  },
+  "keywords": ["claude", "agent", "communication"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "ssh2": "^1.17.0"
+  }
+}
