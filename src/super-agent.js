@@ -183,6 +183,7 @@ class SuperAgent {
   /**
    * Trigger remote Claude to check queue
    * Uses tmux to send "check queue" command with proper Enter key
+   * Split into two commands to ensure Enter is processed correctly
    */
   async triggerRemoteQueueCheck() {
     try {
@@ -190,7 +191,9 @@ class SuperAgent {
 
       // Send simple "check queue" command - CLAUDE.md has instructions for what this means
       // Session is in bypass permissions mode - do NOT use BTab (it cycles modes)
-      const command = `tmux send-keys -t ${tmuxSession} 'check queue' Enter`;
+      // Split into two tmux commands: first types text, then sends C-m (Enter)
+      // This ensures Claude Code CLI processes the Enter key correctly
+      const command = `tmux send-keys -t ${tmuxSession} 'check queue' && tmux send-keys -t ${tmuxSession} C-m`;
 
       await this.executeRemoteCommand(command);
       console.log('[SuperAgent] ✅ Triggered remote queue check via tmux');

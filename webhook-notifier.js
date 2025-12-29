@@ -1,8 +1,9 @@
 /**
  * Webhook Notifier for Remote Slack App
  *
- * This script watches the message-queue.json file and sends webhooks
- * to the super-agent when messages from 'super-agent' user are processed.
+ * This script watches the message-queue.json file and:
+ * 1. Automatically triggers "check queue" when super-agent messages are added
+ * 2. Sends webhooks to super-agent when messages are processed
  *
  * Deploy this to: /home/ubuntu/awsc-new/awesome/slack-app/
  * Run with: node webhook-notifier.js
@@ -16,6 +17,10 @@ import fs from 'fs';
 import { watch } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+const execAsync = promisify(exec);
 
 // Load environment variables
 dotenv.config();
@@ -35,7 +40,7 @@ if (!WEBHOOK_URL) {
 
 console.log('');
 console.log('='.repeat(60));
-console.log('Webhook Notifier for Super-Agent');
+console.log('Webhook Notifier for Super-Agent (AUTONOMOUS MODE)');
 console.log('='.repeat(60));
 console.log(`Queue File: ${QUEUE_FILE}`);
 console.log(`Webhook URL: ${WEBHOOK_URL}`);
@@ -45,6 +50,9 @@ console.log('');
 // Track which messages we've already notified about
 const notifiedMessages = new Set();
 
+// Track which pending messages we've triggered for
+const triggeredPendingMessages = new Set();
+
 // Initialize with current processed IDs
 try {
   const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8'));
@@ -53,6 +61,28 @@ try {
 } catch (error) {
   console.error('❌ Error reading queue file:', error.message);
   process.exit(1);
+}
+
+/**
+ * Trigger remote Claude to check queue via tmux
+ * Split into two commands to ensure Enter is processed correctly
+ */
+async function triggerQueueCheck() {
+  try {
+    const tmuxSession = 'seo';
+    // Send simple "check queue" - CLAUDE.md has instructions for what this means
+    // Session is in bypass permissions mode - do NOT use BTab (it cycles modes away from bypass)
+    // Split into two tmux commands: first types text, then sends C-m (Enter)
+    // This ensures Claude Code CLI processes the Enter key correctly
+    const command = `tmux send-keys -t ${tmuxSession} 'check queue' && tmux send-keys -t ${tmuxSession} C-m`;
+
+    await execAsync(command);
+    console.log('✅ Triggered queue check via tmux');
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to trigger queue check:', error.message);
+    return false;
+  }
 }
 
 /**
@@ -81,6 +111,54 @@ async function notifyWebhook(messageId) {
   } catch (error) {
     console.error(`❌ Webhook error for ${messageId}:`, error.message);
     return false;
+  }
+}
+
+/**
+ * Check for new pending messages from super-agent and trigger processing
+ */
+async function checkPendingQueue() {
+  try {
+    const queue = JSON.parse(fs.readFileSync(QUEUE_FILE, 'utf8'));
+
+    // Find new pending messages from super-agent
+    for (const message of queue.pending) {
+      if (triggeredPendingMessages.has(message.id)) {
+        continue; // Already triggered
+      }
+
+      // Only trigger for messages from super-agent user
+      if (message.user === 'super-agent') {
+        console.log(`🚀 New super-agent message detected: ${message.id}`);
+        console.log(`   Query: ${message.query.substring(0, 60)}...`);
+
+        const success = await triggerQueueCheck();
+
+        if (success) {
+          triggeredPendingMessages.add(message.id);
+          console.log(`✅ Triggered processing for message ${message.id}`);
+        }
+
+        // Only trigger once per file change (batch processing)
+        break;
+      } else {
+        // Mark as seen but don't trigger (not from super-agent)
+        triggeredPendingMessages.add(message.id);
+      }
+    }
+
+    // Cleanup: Remove IDs that are no longer pending
+    const pendingIds = new Set(queue.pending.map(m => m.id));
+    for (const id of triggeredPendingMessages) {
+      if (!pendingIds.has(id)) {
+        triggeredPendingMessages.delete(id);
+      }
+    }
+
+    // Debug stats
+    console.log(`📊 Stats: Pending=${queue.pending.length}, Triggered=${triggeredPendingMessages.size}`);
+  } catch (error) {
+    console.error('❌ Error checking pending queue:', error.message);
   }
 }
 
@@ -124,16 +202,23 @@ watch(QUEUE_FILE, (eventType) => {
   // Debounce rapid file changes
   clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
+    // Check for new pending messages (triggers queue check)
+    checkPendingQueue();
+
+    // Check for processed messages (sends webhooks)
     checkQueue();
   }, 500);
 });
 
-console.log('👀 Watching for new processed messages...');
+console.log('👀 Watching for new messages (AUTONOMOUS MODE)...');
+console.log('   - Auto-triggers "check queue" when super-agent messages arrive');
+console.log('   - Sends webhooks when messages are processed');
 console.log('Press Ctrl+C to stop');
 console.log('');
 
 // Also check periodically (every 10 seconds) in case file watcher misses something
 setInterval(() => {
+  checkPendingQueue();
   checkQueue();
 }, 10000);
 
