@@ -34,7 +34,7 @@ class SuperAgent {
     };
 
     this.sshClient = null;
-    this.notificationServer = config.useWebhooks ? new NotificationServer(this.config.notificationPort) : null;
+    this.notificationServer = this.config.useWebhooks ? new NotificationServer(this.config.notificationPort) : null;
     this.isInitialized = false;
   }
 

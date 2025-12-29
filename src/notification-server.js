@@ -17,6 +17,7 @@ class NotificationServer extends EventEmitter {
     this.app = express();
     this.server = null;
     this.pendingMessages = new Map(); // messageId -> { resolve, reject, timestamp }
+    this.recentCompletions = new Map(); // messageId -> { status, timestamp } - Cache for race condition fix
 
     this.setupRoutes();
   }
@@ -30,7 +31,8 @@ class NotificationServer extends EventEmitter {
       res.json({
         status: 'ok',
         uptime: process.uptime(),
-        pendingMessages: this.pendingMessages.size
+        pendingMessages: this.pendingMessages.size,
+        cachedCompletions: this.recentCompletions.size
       });
     });
 
@@ -54,7 +56,18 @@ class NotificationServer extends EventEmitter {
         waiting.resolve({ messageId, status, notified: true });
         this.pendingMessages.delete(messageId);
       } else {
-        console.log(`[NotificationServer] No waiting promise for ${messageId} (may have already resolved)`);
+        // No waiting promise yet - cache the webhook for 60 seconds
+        // This handles race condition where webhook arrives before waitForNotification() is called
+        console.log(`[NotificationServer] No waiting promise for ${messageId} - caching for 60s`);
+        this.recentCompletions.set(messageId, { status, timestamp: Date.now() });
+
+        // Auto-cleanup after 60 seconds
+        setTimeout(() => {
+          if (this.recentCompletions.has(messageId)) {
+            console.log(`[NotificationServer] Cleaning up cached webhook for ${messageId}`);
+            this.recentCompletions.delete(messageId);
+          }
+        }, 60000);
       }
 
       res.json({ success: true, messageId });
@@ -69,6 +82,18 @@ class NotificationServer extends EventEmitter {
       }));
 
       res.json({ count: pending.length, pending });
+    });
+
+    // Debug: List cached completions
+    this.app.get('/cached', (req, res) => {
+      const cached = Array.from(this.recentCompletions.entries()).map(([id, data]) => ({
+        messageId: id,
+        status: data.status,
+        arrivedAt: new Date(data.timestamp).toISOString(),
+        age: Date.now() - data.timestamp
+      }));
+
+      res.json({ count: cached.length, cached });
     });
   }
 
@@ -118,6 +143,14 @@ class NotificationServer extends EventEmitter {
     return new Promise((resolve, reject) => {
       console.log(`[NotificationServer] Registering wait for message ${messageId}`);
 
+      // Check cache FIRST - webhook may have already arrived (race condition fix)
+      const cached = this.recentCompletions.get(messageId);
+      if (cached) {
+        console.log(`[NotificationServer] Found in cache: ${messageId} (webhook arrived ${Date.now() - cached.timestamp}ms ago)`);
+        this.recentCompletions.delete(messageId);
+        return resolve({ messageId, status: cached.status, notified: true });
+      }
+
       // Store the promise resolvers
       this.pendingMessages.set(messageId, {
         resolve,
@@ -151,6 +184,7 @@ class NotificationServer extends EventEmitter {
       running: !!this.server,
       port: this.port,
       pendingMessages: this.pendingMessages.size,
+      cachedCompletions: this.recentCompletions.size,
       uptime: process.uptime()
     };
   }
