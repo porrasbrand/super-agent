@@ -289,8 +289,72 @@ REMOTE_TMUX_SESSION=seo
 - **User Filter**: Only processes messages from `user: "super-agent"`
 
 ### Remote Services
-- **Webhook Notifier**: Watches remote queue, auto-triggers processing
+- **Webhook Notifier**: Unified queue trigger for ALL messages (super-agent + Slack)
+  - Watches `/home/ubuntu/awsc-new/awesome/slack-app/message-queue.json`
+  - Auto-triggers "check queue" when ANY pending message is added
+  - Sends webhook notifications when super-agent messages complete
+  - Replaces legacy `smart-queue-trigger.sh` (deprecated)
 - **Apache Web Server**: Publishes reports to https://www.manuelporras.com/awesome/
+
+## Unified Queue Triggering System
+
+### How Messages Trigger Remote Processing
+
+The system uses a **unified trigger architecture** to eliminate duplicate "check queue" commands:
+
+#### Single Trigger Point: webhook-notifier.js
+- **Location**: `/home/ubuntu/awsc-new/awesome/slack-app/webhook-notifier.js`
+- **Runs on**: Remote server (PM2 service)
+- **Watches**: `message-queue.json` for file changes
+- **Triggers for**: ALL messages (super-agent + Slack)
+
+#### Message Flow
+```
+1. super-agent queues message → SSH stdin piping → message-queue.json
+2. webhook-notifier detects file change (debounced 500ms)
+3. Checks for new pending messages (any user)
+4. Triggers: tmux send-keys -t seo 'check queue' && tmux send-keys -t seo C-m
+5. Remote Claude processes message
+6. webhook-notifier sends completion webhook (super-agent messages only)
+7. Local notification server receives webhook → resolves response promise
+```
+
+#### Split Command Technique
+The trigger uses a **split command** to ensure Enter key executes properly:
+
+```bash
+# Split into two commands (NOT one atomic command)
+tmux send-keys -t seo 'check queue' && tmux send-keys -t seo C-m
+```
+
+**Why split?** Claude Code CLI's permission UI intercepts Enter when sent atomically with text. Splitting allows proper processing.
+
+#### No Manual Triggering
+- ❌ Super-agent does NOT manually trigger after queuing
+- ❌ No need for separate `smart-queue-trigger.sh` process
+- ✅ webhook-notifier automatically detects and triggers
+- ✅ Single unified trigger eliminates duplicates
+
+#### Message Routing
+Messages are routed based on metadata:
+
+**Super-agent messages:**
+```json
+{
+  "user": "super-agent",
+  "channel": "super-agent"
+}
+```
+→ Webhook sent to local notification server
+
+**Slack messages:**
+```json
+{
+  "user": "U12345ABC",
+  "channel": "C98765XYZ"
+}
+```
+→ Response posted to Slack API (auto-queue-responder.js)
 
 ## Best Practices
 
@@ -356,6 +420,31 @@ pm2 restart super-agent-watcher
 
 # Check remote queue
 ~/.ssh/remote-claude-wrapper.sh "cat /home/ubuntu/awsc-new/awesome/slack-app/message-queue.json" | jq .
+
+# Check webhook-notifier is running
+~/.ssh/remote-claude-wrapper.sh "tmux list-sessions | grep webhook"
+```
+
+### Messages not triggering remote processing
+```bash
+# Check webhook-notifier logs on remote
+~/.ssh/remote-claude-wrapper.sh "tmux capture-pane -t webhook-notifier -p -S -50"
+
+# Verify webhook-notifier is watching the queue
+~/.ssh/remote-claude-wrapper.sh "ps aux | grep webhook-notifier"
+
+# Check for duplicate trigger processes (should be NONE)
+~/.ssh/remote-claude-wrapper.sh "ps aux | grep smart-queue-trigger"
+```
+
+### Duplicate "check queue" commands
+This should NOT happen anymore with the unified trigger system. If you see duplicates:
+```bash
+# Verify only webhook-notifier is triggering
+~/.ssh/remote-claude-wrapper.sh "ps aux | grep -E '(webhook-notifier|smart-queue)'"
+
+# Check for multiple file watchers
+~/.ssh/remote-claude-wrapper.sh "lsof /home/ubuntu/awsc-new/awesome/slack-app/message-queue.json"
 ```
 
 ### SSH connection issues
@@ -388,6 +477,15 @@ All logic lives in code (`*.js`, `*.sh`), not in Claude's memory. This makes the
 ## Version Info
 
 - **Created**: 2025-12-29
-- **Last Updated**: 2025-12-29
+- **Last Updated**: 2025-12-29 (Unified trigger system implemented)
 - **Node Version**: 20.x+
 - **PM2 Version**: 5.x+
+
+## Recent Changes
+
+### 2025-12-29: Unified Trigger System
+- ✅ Updated webhook-notifier.js to trigger for ALL messages (super-agent + Slack)
+- ✅ Implemented split command fix for tmux send-keys (Enter key execution)
+- ✅ Removed manual triggering from super-agent.js (eliminated duplicates)
+- ✅ Deprecated smart-queue-trigger.sh (killed on remote)
+- ✅ Single unified trigger point eliminates duplicate "check queue" commands
