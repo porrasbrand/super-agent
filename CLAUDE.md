@@ -433,6 +433,230 @@ Messages are routed based on metadata:
 # Example: "Published to https://www.manuelporras.com/awesome/palantir-report.html"
 ```
 
+## System Processes & Auto-Start
+
+### Critical Processes
+
+The super-agent system requires **two critical processes** to be running at all times:
+
+1. **Webhook Notification Server** (`webhook-notifier.js`)
+   - **Purpose**: Receives completion webhooks from remote Claude
+   - **Port**: 9000 (HTTP server)
+   - **Required for**: Real-time response notifications (<1s latency)
+   - **Falls back to**: Polling mode if server not running
+
+2. **Remote Health Monitor** (`monitor-remote-health.js`)
+   - **Purpose**: Monitors remote Claude health and triggers auto-recovery
+   - **Check interval**: Every 5 minutes
+   - **Freeze detection**: >10 minutes of no activity
+   - **Auto-recovery**: 3-stage progressive strategy (graceful → force → manual)
+
+### Manual Startup
+
+**Single "Run All" Script:**
+```bash
+# Start all super-agent processes
+./start-super-agent.sh
+
+# Check status only (no startup)
+./start-super-agent.sh --status
+```
+
+This script:
+- ✅ Checks and starts webhook server if not running
+- ✅ Verifies health monitor service status
+- ✅ Tests remote SSH connectivity
+- ✅ Shows comprehensive status dashboard
+- ✅ Validates all dependencies (Node.js, required files)
+
+**What it shows:**
+```
+╔════════════════════════════════════════════════════════════╗
+║           SUPER-AGENT SYSTEM STATUS                        ║
+╚════════════════════════════════════════════════════════════╝
+
+✅ Webhook Server: RUNNING (PID: 12345)
+✅ Health Monitor: RUNNING (systemd)
+✅ Remote Claude: HEALTHY
+```
+
+### Auto-Start on Boot (Production Setup)
+
+**Install systemd services** to auto-start processes when WSL boots:
+
+```bash
+# Install both services (requires sudo)
+sudo ./install-all-services.sh
+```
+
+This installs and enables:
+
+#### 1. Webhook Server Service
+- **Service**: `webhook-server.service`
+- **Status**: `sudo systemctl status webhook-server`
+- **Logs**: `tail -f /tmp/webhook-server.log`
+- **Auto-restarts**: On crash (RestartSec=10s)
+- **Resource limits**: 256MB memory, 4096 file descriptors
+
+#### 2. Health Monitor Service
+- **Service**: `remote-claude-monitor.service`
+- **Status**: `sudo systemctl status remote-claude-monitor`
+- **Logs**: `sudo journalctl -u remote-claude-monitor -f`
+- **Auto-restarts**: On crash (RestartSec=30s)
+- **Features**: Auto-recovery, freeze detection, progressive restart strategies
+
+### Service Management Commands
+
+```bash
+# Start all services
+sudo systemctl start webhook-server remote-claude-monitor
+
+# Stop all services
+sudo systemctl stop webhook-server remote-claude-monitor
+
+# Restart all services
+sudo systemctl restart webhook-server remote-claude-monitor
+
+# Enable auto-start on boot
+sudo systemctl enable webhook-server remote-claude-monitor
+
+# Disable auto-start
+sudo systemctl disable webhook-server remote-claude-monitor
+
+# View service status
+./start-super-agent.sh --status
+
+# View real-time logs
+sudo journalctl -u webhook-server -u remote-claude-monitor -f
+```
+
+### Installation Steps (One-Time Setup)
+
+**After first git clone or system reinstall:**
+
+1. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+2. **Install systemd services:**
+   ```bash
+   sudo ./install-all-services.sh
+   ```
+
+3. **Verify installation:**
+   ```bash
+   ./start-super-agent.sh --status
+   ```
+
+Expected output:
+- ✅ Webhook Server: RUNNING
+- ✅ Health Monitor: RUNNING
+- ✅ Remote Claude: HEALTHY
+
+### Log Files
+
+| Process | Log Location | Purpose |
+|---------|--------------|---------|
+| Webhook Server | `/tmp/webhook-server.log` | Normal output |
+| Webhook Server | `/tmp/webhook-server-error.log` | Error output |
+| Health Monitor | `/var/log/remote-claude-monitor.log` | Normal output |
+| Health Monitor | `/var/log/remote-claude-monitor-error.log` | Error output |
+| Health Checks | `/tmp/remote-health.log` | Health check history |
+| Recovery | `/tmp/recovery.log` | Auto-recovery attempts |
+| Status | `/tmp/remote-status.json` | Current health status (real-time) |
+
+### Health Monitoring Details
+
+**How freeze detection works:**
+```
+Time 0:00  - Remote Claude working normally
+Time 0:10  - Remote stops responding (frozen)
+Time 0:15  - Health monitor detects freeze (>10 min no activity)
+Time 0:15  - Auto-recovery triggered: Strategy 1 (graceful restart)
+Time 0:16  - Remote restarted successfully
+Time 0:17  - Monitoring resumes normally
+```
+
+**Recovery strategies** (progressive escalation):
+
+1. **Strategy 1: Graceful Restart** (Attempt 1)
+   - Send Ctrl+C to current Claude session
+   - Kill Claude process with SIGTERM
+   - Kill tmux session cleanly
+   - Start new tmux session with Claude
+
+2. **Strategy 2: Force Restart** (Attempt 2)
+   - Kill all Claude processes with SIGKILL (-9)
+   - Force kill tmux session
+   - Start new tmux session with Claude
+
+3. **Strategy 3: Manual Intervention** (Attempt 3+)
+   - Log failure and stop auto-recovery
+   - Require manual diagnosis and restart
+   - Prevents infinite restart loops
+
+**Recovery attempt tracking:**
+- Max attempts: 3 per freeze incident
+- Reset after: 1 hour of successful operation
+- Status file: `/tmp/recovery-attempts.txt`
+
+### Process Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ WSL2 Machine (Local)                                        │
+│                                                             │
+│  ┌──────────────────────┐      ┌─────────────────────────┐│
+│  │ Webhook Server       │      │ Health Monitor          ││
+│  │ (Port 9000)          │◄─────┤ (5-min checks)          ││
+│  │                      │      │                         ││
+│  │ - Receives webhooks  │      │ - Monitors remote       ││
+│  │ - Notifies clients   │      │ - Auto-recovery         ││
+│  │ - Auto-starts (boot) │      │ - Auto-starts (boot)    ││
+│  └──────────────────────┘      └─────────────────────────┘│
+│            ▲                              │                │
+│            │                              │                │
+│            │ webhook                      │ SSH check      │
+└────────────┼──────────────────────────────┼────────────────┘
+             │                              │
+             │                              ▼
+┌────────────┼──────────────────────────────┼────────────────┐
+│ Remote Server (ssh.manuelporras.com:2222)  │               │
+│            │                              │                │
+│  ┌─────────┴────────────┐      ┌─────────┴──────────────┐ │
+│  │ Webhook Notifier     │      │ Claude in tmux "seo"   │ │
+│  │ (Queue watcher)      │──────┤ (Task processor)       │ │
+│  │                      │      │                        │ │
+│  │ - Watches queue      │      │ - Processes messages   │ │
+│  │ - Triggers "check"   │      │ - Sends webhooks       │ │
+│  │ - Sends webhooks     │      │ - Updates queue        │ │
+│  └──────────────────────┘      └────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### When Services Are Not Installed
+
+If systemd services are **not installed** (fresh machine, services disabled):
+
+**Webhook server**: Automatically starts per-message
+- Each `send-message.sh` call creates temporary server
+- Server shuts down after response received
+- Slightly slower due to startup/shutdown overhead
+
+**Health monitor**: Not running
+- No automatic freeze detection
+- No auto-recovery
+- Manual intervention required if remote freezes
+
+**To enable production features**: Run `sudo ./install-all-services.sh`
+
+### Documentation
+
+- **Quick Start Guide**: `/home/mp/awesome/super-agent/docs/QUICK-START.md`
+- **Full Monitoring System**: `/home/mp/awesome/super-agent/docs/remote-monitoring-system.md`
+- **Phase 4 Enhancements**: Future improvements (multi-agent redundancy, predictive failure detection)
+
 ## Troubleshooting
 
 ### Service not processing tasks
@@ -511,11 +735,42 @@ All logic lives in code (`*.js`, `*.sh`), not in Claude's memory. This makes the
 ## Version Info
 
 - **Created**: 2025-12-29
-- **Last Updated**: 2025-12-29 (Unified trigger system implemented)
+- **Last Updated**: 2025-12-30 (Production monitoring & auto-start system)
 - **Node Version**: 20.x+
 - **PM2 Version**: 5.x+
 
 ## Recent Changes
+
+### 2025-12-30: Production Monitoring & Auto-Start System
+
+**Phase 3 Production Monitoring:**
+- ✅ Implemented health monitoring system (`monitor-remote-health.js`)
+- ✅ Created auto-recovery script with 3-stage progressive strategy (`recover-remote.sh`)
+- ✅ Freeze detection: >10 minutes of inactivity triggers auto-recovery
+- ✅ Recovery strategies: Graceful restart → Force kill → Manual intervention
+- ✅ Systemd service integration (`remote-claude-monitor.service`)
+- ✅ Comprehensive documentation (Quick Start + Full System docs)
+
+**Auto-Start on Boot:**
+- ✅ Created unified startup script (`start-super-agent.sh`)
+- ✅ Implemented systemd services for both webhook server and health monitor
+- ✅ Installation script for one-command setup (`install-all-services.sh`)
+- ✅ Auto-restart on crash with configurable intervals
+- ✅ Resource limits and security hardening (NoNewPrivileges, PrivateTmp)
+- ✅ Comprehensive logging to `/var/log/` and `/tmp/`
+
+**Documentation:**
+- ✅ Added "System Processes & Auto-Start" section to CLAUDE.md
+- ✅ Process architecture diagram
+- ✅ Service management commands
+- ✅ Installation steps for new machines
+- ✅ Log file locations and purposes
+- ✅ Health monitoring workflow and recovery strategies
+
+**Remote Claude Recovery:**
+- ✅ Successfully recovered remote Claude from 11-hour freeze
+- ✅ Used Windows SSH proxy for WSL → remote connectivity
+- ✅ Verified tmux session restart and Claude process initialization
 
 ### 2025-12-29: System Improvements
 

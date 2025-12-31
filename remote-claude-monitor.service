@@ -1,0 +1,37 @@
+[Unit]
+Description=Remote Claude Health Monitor and Auto-Recovery
+Documentation=file:///home/mp/awesome/super-agent/docs/remote-monitoring-system.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mp
+WorkingDirectory=/home/mp/awesome/super-agent
+Environment="NODE_ENV=production"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+# Main monitor process
+ExecStart=/usr/bin/node /home/mp/awesome/super-agent/monitor-remote-health.cjs
+
+# Restart policy
+Restart=always
+RestartSec=30
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=append:/var/log/remote-claude-monitor.log
+StandardError=append:/var/log/remote-claude-monitor-error.log
+SyslogIdentifier=remote-claude-monitor
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=4096
+MemoryLimit=256M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,37 @@
+[Unit]
+Description=Super-Agent Webhook Notification Server
+Documentation=file:///home/mp/awesome/super-agent/docs/remote-monitoring-system.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mp
+WorkingDirectory=/home/mp/awesome/super-agent
+Environment="NODE_ENV=production"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+
+# Webhook server process
+ExecStart=/usr/bin/node /home/mp/awesome/super-agent/src/notification-server-standalone.js
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=5
+
+# Logging
+StandardOutput=append:/tmp/webhook-server.log
+StandardError=append:/tmp/webhook-server-error.log
+SyslogIdentifier=webhook-server
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits
+LimitNOFILE=4096
+MemoryLimit=256M
+
+[Install]
+WantedBy=multi-user.target
