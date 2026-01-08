@@ -138,7 +138,9 @@ class SuperAgent {
     const fullCommand = `${wrapperScript} "${command.replace(/"/g, '\\"')}"`;
 
     try {
-      const { stdout, stderr } = await execAsync(fullCommand);
+      const { stdout, stderr } = await execAsync(fullCommand, {
+        maxBuffer: 10 * 1024 * 1024 // 10MB buffer (prevents overflow from large queue files)
+      });
 
       if (stderr && !stderr.includes('dotenv')) {
         console.warn('[SuperAgent] SSH stderr:', stderr);
